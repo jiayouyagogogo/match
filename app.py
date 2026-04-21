@@ -1,7 +1,6 @@
-from flask import Flask, render_template, request
+from flask import Flask, request, render_template
 from flask_socketio import SocketIO, emit
 import os
-import random
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'default-secret-key-for-dev')
@@ -9,20 +8,18 @@ socketio = SocketIO(app, cors_allowed_origins="*")
 
 # ========== 全局匹配数据 ==========
 total_players = 200          # 默认总人数
-max_buyers = 100             # 买方总名额
-max_sellers = 100            # 卖方总名额
-current_buyers = 0           # 已加入的买方人数
-current_sellers = 0          # 已加入的卖方人数
+max_buyers = 100
+max_sellers = 100
+current_buyers = 0
+current_sellers = 0
 
-waiting_buyers = []          # 等待匹配的买方列表 (存放 sid)
-waiting_sellers = []         # 等待匹配的卖方列表
+waiting_buyers = []
+waiting_sellers = []
+clients = {}                 # {socket_id: {"role": "buyer", "name": "...", "info": "..."}}
+pairs = {}
 
-clients = {}                 # {sid: {"role": "buyer", "name": "张三", "info": "..."}}
-pairs = {}                   # {sid: opponent_info}
-
-# ========== 辅助函数 ==========
+# ========== 辅助函数：匹配逻辑 ==========
 def try_match(sid):
-    """尝试为某个用户进行匹配"""
     user = clients.get(sid)
     if not user:
         return
@@ -57,30 +54,25 @@ def try_match(sid):
 # ========== 路由 ==========
 @app.route('/')
 def index():
-    """用户访问的主页面"""
     return app.send_static_file('index.html')
 
 @app.route('/admin')
 def admin_page():
-    """管理员设置页面"""
     return app.send_static_file('admin.html')
 
 # ========== Socket.IO 事件处理 ==========
 @socketio.on('connect')
 def handle_connect():
-    sid = request.sid
-    print(f"🔗 客户端连接: {sid}")
+    print(f"🔗 客户端连接: {request.sid}")
 
 @socketio.on('disconnect')
 def handle_disconnect():
     sid = request.sid
     print(f"❌ 客户端断开: {sid}")
-    # 从等待队列中移除
     if sid in waiting_buyers:
         waiting_buyers.remove(sid)
     if sid in waiting_sellers:
         waiting_sellers.remove(sid)
-    # 从clients中移除
     if sid in clients:
         user = clients.pop(sid)
         global current_buyers, current_sellers
@@ -98,7 +90,6 @@ def handle_register(data):
 
     global current_buyers, current_sellers
 
-    # 检查是否已达人数上限
     if role == 'buyer' and current_buyers >= max_buyers:
         emit('error', {'message': '买方人数已满，无法加入'})
         return False
@@ -106,12 +97,7 @@ def handle_register(data):
         emit('error', {'message': '卖方人数已满，无法加入'})
         return False
 
-    # 保存用户信息
-    clients[sid] = {
-        'role': role,
-        'name': name,
-        'info': info
-    }
+    clients[sid] = {'role': role, 'name': name, 'info': info}
     if role == 'buyer':
         current_buyers += 1
     else:
@@ -119,8 +105,6 @@ def handle_register(data):
 
     emit('registered', {'message': f'已登记为{role}', 'role': role})
     print(f"📝 用户登记: {name} ({role})")
-
-    # 登记后自动尝试匹配
     try_match(sid)
 
 @socketio.on('start_match')
@@ -140,7 +124,7 @@ def handle_set_total(data):
         max_buyers = total // 2
         max_sellers = total // 2
         print(f"⚙️ 总人数设置为 {total}，买卖双方各 {max_buyers} 人")
-        emit('total_set', {'total': total_players, 'buyers_max': max_buyers, 'sellers_max': max_sellers}, broadcast=True)
+        emit('total_set', {'total': total_players, 'buyers_max': max_buyers, 'sellers_max': max_sellers})
     except:
         emit('error', {'message': '请输入有效数字'})
 
@@ -154,9 +138,8 @@ def handle_get_status():
         'waiting_sellers': len(waiting_sellers)
     })
 
-# ========== 启动服务器 ==========
+# ========== 启动 ==========
 if __name__ == '__main__':
-    # 设置静态文件夹为当前目录，以便提供 index.html 和 admin.html
     import os
     app._static_folder = os.path.abspath(".")
     port = int(os.environ.get('PORT', 5000))
