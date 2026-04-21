@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>谈判对象匹配</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 600px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f7fa;
+        }
+        .container {
+            background: white;
+            border-radius: 16px;
+            padding: 30px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+        h2 { color: #2c3e50; margin-top: 0; }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 6px;
+            font-weight: 500;
+            color: #34495e;
+        }
+        select, input {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #dcdfe6;
+            border-radius: 8px;
+            font-size: 16px;
+            box-sizing: border-box;
+        }
+        button {
+            background: #409eff;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 16px;
+            cursor: pointer;
+            width: 100%;
+            font-weight: 600;
+        }
+        button:hover { background: #66b1ff; }
+        button:disabled { background: #a0cfff; cursor: not-allowed; }
+        .match-info {
+            margin-top: 30px;
+            padding: 20px;
+            background: #ecf5ff;
+            border-radius: 12px;
+            border-left: 6px solid #409eff;
+        }
+        .error {
+            color: #f56c6c;
+            margin-top: 10px;
+        }
+        .waiting {
+            color: #e6a23c;
+            margin-top: 10px;
+            font-style: italic;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>🤝 谈判对手匹配系统</h2>
+
+        <!-- 未匹配时显示表单 -->
+        <div id="form-section">
+            <div class="form-group">
+                <label>选择你的身份：</label>
+                <select id="role-select">
+                    <option value="buyer">我是买方</option>
+                    <option value="seller">我是卖方</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>你的昵称：</label>
+                <input type="text" id="name-input" placeholder="如：张三" maxlength="20">
+            </div>
+            <div class="form-group">
+                <label>补充信息（可选）：</label>
+                <input type="text" id="info-input" placeholder="如：采购经理 / 销售代表">
+            </div>
+            <button id="submit-btn" onclick="registerAndMatch()">开始匹配</button>
+            <div id="error-msg" class="error"></div>
+            <div id="waiting-msg" class="waiting"></div>
+        </div>
+
+        <!-- 匹配成功后显示对手信息 -->
+        <div id="result-section" style="display: none;">
+            <div class="match-info">
+                <h3>🎉 匹配成功！</h3>
+                <p>你的谈判对手是：</p>
+                <p><strong id="opponent-name"></strong> （<span id="opponent-role"></span>）</p>
+                <p>对方备注：<span id="opponent-info"></span></p>
+            </div>
+            <p style="margin-top: 20px; color: #909399;">请与对方开始谈判吧～</p>
+        </div>
+
+        <hr style="margin: 30px 0; border: none; border-top: 1px solid #eee;">
+        <div style="text-align: center; font-size: 14px; color: #999;">
+            <a href="/admin" target="_blank">管理员设置</a> | 当前总人数上限：<span id="total-display">--</span>
+        </div>
+    </div>
+
+    <!-- 引入 Socket.IO 客户端库 -->
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script>
+        // 连接后端 WebSocket
+        const socket = io();  // 默认连接当前页面的主机
+
+        // 页面元素
+        const formSection = document.getElementById('form-section');
+        const resultSection = document.getElementById('result-section');
+        const errorMsg = document.getElementById('error-msg');
+        const waitingMsg = document.getElementById('waiting-msg');
+        const submitBtn = document.getElementById('submit-btn');
+
+        let hasRegistered = false;
+
+        // 监听连接成功
+        socket.on('connect', () => {
+            console.log('✅ 已连接到服务器');
+            // 获取当前总人数设置（显示在底部）
+            socket.emit('get_status');
+        });
+
+        // 监听状态更新（用于显示总人数上限）
+        socket.on('status', (data) => {
+            document.getElementById('total-display').innerText = data.total;
+        });
+
+        // 监听登记成功
+        socket.on('registered', (data) => {
+            console.log('登记成功:', data);
+            errorMsg.innerText = '';
+        });
+
+        // 监听等待状态
+        socket.on('waiting', (data) => {
+            waitingMsg.innerText = data.message;
+        });
+
+        // 监听匹配成功
+        socket.on('match_success', (data) => {
+            const opponent = data.opponent;
+            document.getElementById('opponent-name').innerText = opponent.name;
+            document.getElementById('opponent-role').innerText = opponent.role === 'buyer' ? '买方' : '卖方';
+            document.getElementById('opponent-info').innerText = opponent.info || '无';
+
+            // 切换显示
+            formSection.style.display = 'none';
+            resultSection.style.display = 'block';
+            waitingMsg.innerText = '';
+        });
+
+        // 监听错误
+        socket.on('error', (data) => {
+            errorMsg.innerText = data.message;
+            submitBtn.disabled = false;
+        });
+
+        // 用户点击“开始匹配”
+        function registerAndMatch() {
+            const role = document.getElementById('role-select').value;
+            const name = document.getElementById('name-input').value.trim();
+            const info = document.getElementById('info-input').value.trim();
+
+            if (!name) {
+                errorMsg.innerText = '请输入昵称';
+                return;
+            }
+
+            // 禁用按钮防止重复点击
+            submitBtn.disabled = true;
+            errorMsg.innerText = '';
+            waitingMsg.innerText = '正在为你寻找谈判对手...';
+
+            // 发送登记信息
+            socket.emit('register', {
+                role: role,
+                name: name,
+                info: info
+            });
+
+            hasRegistered = true;
+        }
+
+        // 如果断线重连后需要重新登记，这里简化处理
+    </script>
+</body>
+</html>
