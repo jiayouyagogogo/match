@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <title>管理员面板 - 匹配系统</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            max-width: 500px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f7fa;
+        }
+        .panel {
+            background: white;
+            border-radius: 16px;
+            padding: 25px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+        h2 { color: #2c3e50; }
+        .stat { background: #ecf5ff; padding: 12px; border-radius: 8px; margin: 15px 0; }
+        button { background: #409eff; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; }
+        button:hover { background: #66b1ff; }
+        input { padding: 8px; width: 80px; margin-right: 10px; border-radius: 6px; border: 1px solid #dcdfe6; }
+    </style>
+</head>
+<body>
+    <div class="panel">
+        <h2>⚙️ 管理员控制台</h2>
+        <div>
+            <label>设置总人数：</label>
+            <input type="number" id="total-input" value="200" min="2" step="2">
+            <button onclick="setTotal()">应用</button>
+            <p style="font-size: 14px; color: #909399;">人数必须为偶数，自动平分买卖双方</p>
+        </div>
+        <div class="stat">
+            <h3>实时状态</h3>
+            <p>总人数上限：<span id="stat-total">200</span></p>
+            <p>已加入买方：<span id="stat-buyers">0</span> / <span id="stat-max-buyers">100</span></p>
+            <p>已加入卖方：<span id="stat-sellers">0</span> / <span id="stat-max-sellers">100</span></p>
+            <p>等待匹配的买方：<span id="stat-wait-buyers">0</span></p>
+            <p>等待匹配的卖方：<span id="stat-wait-sellers">0</span></p>
+        </div>
+        <button onclick="refreshStatus()">刷新状态</button>
+    </div>
+
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script>
+        const socket = io();
+
+        socket.on('connect', () => {
+            console.log('管理面板已连接');
+            refreshStatus();
+        });
+
+        socket.on('status', (data) => {
+            document.getElementById('stat-total').innerText = data.total;
+            document.getElementById('stat-buyers').innerText = data.buyers_joined;
+            document.getElementById('stat-sellers').innerText = data.sellers_joined;
+            document.getElementById('stat-wait-buyers').innerText = data.waiting_buyers;
+            document.getElementById('stat-wait-sellers').innerText = data.waiting_sellers;
+            // 理论上 max 可以通过 total/2 计算
+            const maxEach = data.total / 2;
+            document.getElementById('stat-max-buyers').innerText = maxEach;
+            document.getElementById('stat-max-sellers').innerText = maxEach;
+        });
+
+        socket.on('total_set', (data) => {
+            alert(`总人数已设置为 ${data.total}，买卖双方各 ${data.buyers_max} 人`);
+            refreshStatus();
+        });
+
+        function setTotal() {
+            const total = parseInt(document.getElementById('total-input').value);
+            if (total < 2 || total % 2 !== 0) {
+                alert('请输入大于等于2的偶数');
+                return;
+            }
+            socket.emit('set_total', { total: total });
+        }
+
+        function refreshStatus() {
+            socket.emit('get_status');
+        }
+    </script>
+</body>
+</html>
